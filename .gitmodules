@@ -1,0 +1,3 @@
+[submodule "hala"]
+	path = hala
+	url = https://github.com/HalaOS/hala-rs.git

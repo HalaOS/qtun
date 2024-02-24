@@ -1,0 +1,20 @@
+[workspace]
+exclude = ["hala"]
+members = ["crates/*", "apps/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+repository = "https://github.com/HalaOS/qtun.git"
+version = "0.1.4"
+
+[workspace.dependencies]
+hala-qtun = {path = "crates/qtun", version = "^0.1", default-features = false}
+hala-rs = {path = "hala/hala", version = "^0.1"}
+
+log = {version = "^0.4"}
+pretty_env_logger = "^0.5"
+
+clap = {version = "^4.4", features = ["derive"]}
+duration-str = "0.7.1"
+futures = {version = "^0.3.29", features = ["executor", "thread-pool"]}
