@@ -35,6 +35,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Install nasm
         uses: ilammy/setup-nasm@v1
         if: startsWith(matrix.os, 'windows')
