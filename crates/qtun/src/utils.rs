@@ -5,6 +5,8 @@ where
     R: AsyncRead,
     W: AsyncWrite + Unpin,
 {
+    log::info!("{:?}", debug_info);
+
     match copy(reader, &mut writer).await {
         Ok(bytes) => {
             log::info!("{:?}, EOF with transferred {}", debug_info, bytes);
@@ -23,7 +25,7 @@ where
 {
     match writer.close().await {
         Ok(_) => {
-            log::trace!("{:?}, try close write stream", debug_info);
+            log::info!("{:?}, try close write stream", debug_info);
         }
         Err(err) => {
             log::error!(

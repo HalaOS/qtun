@@ -45,8 +45,8 @@ impl QtunClient {
                 }
             };
 
-            let forward_debug_info = format!("forward: {} => {}", stream, raddr);
-            let backward_debug_info = format!("backward: {} => {}", raddr, stream,);
+            let forward_debug_info = format!("forward: {} => {}", raddr, stream,);
+            let backward_debug_info = format!("backward: {} => {}", stream, raddr);
 
             let (tcp_read, tcp_write) = conn.split();
             let quic_read = stream.clone();
