@@ -177,12 +177,12 @@ pub(crate) fn make_config(quic_tunn_config: &QuicTunnelConfig) -> Config {
 
     config.set_max_idle_timeout(quic_tunn_config.timeout.as_millis() as u64);
     config.set_max_send_udp_payload_size(quic_tunn_config.mtu);
+    config.set_max_recv_udp_payload_size(quic_tunn_config.mtu);
     config.set_initial_max_data(quic_tunn_config.buf * quic_tunn_config.mux);
     config.set_initial_max_stream_data_bidi_local(quic_tunn_config.buf);
     config.set_initial_max_stream_data_bidi_remote(quic_tunn_config.buf);
     config.set_initial_max_streams_bidi(quic_tunn_config.mux);
     config.set_initial_max_streams_uni(quic_tunn_config.mux);
-    config.set_disable_active_migration(false);
     config.set_cc_algorithm(quic_tunn_config.cc.clone().into());
     config.set_max_connection_window(quic_tunn_config.max_conn_win);
     config.set_max_stream_window(quic_tunn_config.max_stream_win);
