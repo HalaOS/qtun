@@ -10,3 +10,7 @@ version.workspace = true
 hala-qtun = { workspace = true, features = ["client", "app"] }
 log = { workspace = true }
 pretty_env_logger = { workspace = true }
+futures = { workspace = true }
+rasi = { workspace = true }
+rasi-default = { workspace = true }
+clap = { workspace = true }

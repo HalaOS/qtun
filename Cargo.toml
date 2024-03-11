@@ -1,6 +1,6 @@
 [workspace]
 exclude = ["hala"]
-members = ["crates/*"]
+members = ["crates/*", "apps/*"]
 resolver = "2"
 
 [workspace.package]

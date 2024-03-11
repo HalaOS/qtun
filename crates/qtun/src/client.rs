@@ -45,16 +45,17 @@ impl QtunClient {
                 }
             };
 
-            let debug_info = format!("tunnel: {} => {}", raddr, stream);
+            let forward_debug_info = format!("forward: {} => {}", stream, raddr);
+            let backward_debug_info = format!("backward: {} => {}", raddr, stream,);
 
             let (tcp_read, tcp_write) = conn.split();
             let quic_read = stream.clone();
             let quic_write = stream;
 
             // create forward tunnel.
-            spawn(tunnel_copy(debug_info.clone(), tcp_read, quic_write));
+            spawn(tunnel_copy(forward_debug_info, tcp_read, quic_write));
             // create backward tunnel.
-            spawn(tunnel_copy(debug_info, quic_read, tcp_write));
+            spawn(tunnel_copy(backward_debug_info, quic_read, tcp_write));
         }
     }
 }

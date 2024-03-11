@@ -56,16 +56,21 @@ impl QtunServer {
                         }
                     };
 
-                    let debug_info = format!("tunnel: {} => {}", quic_stream, raddr);
+                    let forward_debug_info = format!("forward: {} => {}", quic_stream, raddr);
+                    let backward_debug_info = format!("backward: {} => {}", raddr, quic_stream,);
 
                     let (tcp_read, tcp_write) = tcp_stream.split();
                     let quic_read = quic_stream.clone();
                     let quic_write = quic_stream;
 
                     // create forward tunnel.
-                    spawn(tunnel_copy(debug_info.clone(), quic_read, tcp_write));
+                    spawn(tunnel_copy(
+                        forward_debug_info.clone(),
+                        quic_read,
+                        tcp_write,
+                    ));
                     // create backward tunnel.
-                    spawn(tunnel_copy(debug_info, tcp_read, quic_write));
+                    spawn(tunnel_copy(backward_debug_info, tcp_read, quic_write));
                 }
 
                 log::info!("Quic server: connection closed, {}", conn);
