@@ -1,58 +1,60 @@
 use std::io;
 
-use futures::{future::BoxFuture, AsyncRead, AsyncReadExt, AsyncWrite};
-use hala_rs::{
-    future::executor::future_spawn,
-    net::quic::QuicConnPool,
-    rproxy::{ConnId, Handshaker, Session},
+use rasi::{executor::spawn, net::TcpListener};
+use rasi_ext::net::quic::QuicConnPool;
+
+use crate::{
+    config::{make_config, QuicTunnelConfig},
+    utils::tunnel_copy,
 };
 
-use crate::utils::tunnel_copy;
-
-/// The handshake implementation for client-side app.
-///
-/// We can convert [`QuicConnPool`] into this type via [`from`](ClientHandshaker::from) function.
-pub struct QuicTunnHandshaker(QuicConnPool);
-
-impl From<QuicConnPool> for QuicTunnHandshaker {
-    fn from(value: QuicConnPool) -> Self {
-        Self(value)
-    }
+/// Qtun client type.
+pub struct QtunClient {
+    /// The tcp socket listener for client side.
+    tcp_listener: TcpListener,
+    /// Forward quic connection pool.
+    conn_pool: QuicConnPool,
 }
 
-impl Handshaker for QuicTunnHandshaker {
-    type Handshake<'a> = BoxFuture<'a, io::Result<Session>>;
-    fn handshake<C: AsyncWrite + AsyncRead + Send + 'static>(
-        &self,
-        conn_id: &ConnId<'_>,
-        conn: C,
-    ) -> Self::Handshake<'_> {
-        let conn_id = conn_id.clone().into_owned();
+impl QtunClient {
+    /// Create client instance with [`QuicTunnelConfig`].
+    pub async fn new(tunnel_config: QuicTunnelConfig) -> io::Result<Self> {
+        let tcp_listener = TcpListener::bind(tunnel_config.laddrs.as_slice()).await?;
 
-        Box::pin(async move {
-            let stream = self.0.open_stream().await?;
+        let quic_config = make_config(&tunnel_config);
 
-            log::debug!("{:?}, quic forward: {:?}", conn_id, stream);
+        let conn_pool = QuicConnPool::new(None, tunnel_config.raddrs.as_slice(), quic_config)?;
 
-            let session = Session::new(conn_id);
-
-            let (forward_read, backward_write) = conn.split();
-
-            future_spawn(tunnel_copy(
-                "QuicTunn(forward)",
-                session.clone(),
-                forward_read,
-                stream.clone(),
-            ));
-
-            future_spawn(tunnel_copy(
-                "QuicTunn(backward)",
-                session.clone(),
-                stream,
-                backward_write,
-            ));
-
-            Ok(session)
+        Ok(QtunClient {
+            tcp_listener,
+            conn_pool,
         })
+    }
+
+    pub async fn run(&self) -> io::Result<()> {
+        loop {
+            let (conn, raddr) = self.tcp_listener.accept().await?;
+
+            log::info!("Qtun client: newly inbound connection from {:?}", raddr);
+
+            let stream = match self.conn_pool.stream_open().await {
+                Ok(stream) => stream,
+                Err(err) => {
+                    log::error!("Qtun client: open tunnel with error, {}", err);
+                    continue;
+                }
+            };
+
+            let debug_info = format!("tunnel: {} => {}", raddr, stream);
+
+            let (tcp_read, tcp_write) = conn.split();
+            let quic_read = stream.clone();
+            let quic_write = stream;
+
+            // create forward tunnel.
+            spawn(tunnel_copy(debug_info.clone(), tcp_read, quic_write));
+            // create backward tunnel.
+            spawn(tunnel_copy(debug_info, quic_read, tcp_write));
+        }
     }
 }

@@ -1,64 +1,77 @@
-use std::{
-    io,
-    net::{SocketAddr, ToSocketAddrs},
+use std::{io, net::SocketAddr};
+
+use rasi::{executor::spawn, net::TcpStream};
+use rasi_ext::net::quic::QuicListener;
+
+use crate::{
+    config::{make_config, QuicTunnelConfig},
+    utils::tunnel_copy,
 };
 
-use futures::{future::BoxFuture, AsyncReadExt};
-use hala_rs::{
-    future::executor::future_spawn,
-    net::tcp::TcpStream,
-    rproxy::{ConnId, Handshaker, Session},
-};
-
-use crate::utils::tunnel_copy;
-
-/// Server side [`Handshaker`] implementation that forward tunnel data to remote peers by tcp stream.
-pub struct TcpForwardHandshaker(pub Vec<SocketAddr>);
-
-impl TcpForwardHandshaker {
-    pub fn new<S: ToSocketAddrs>(raddrs: S) -> io::Result<Self> {
-        let raddrs = raddrs.to_socket_addrs()?.collect::<Vec<_>>();
-
-        Ok(Self(raddrs))
-    }
+/// Qtun server type.
+pub struct QtunServer {
+    raddrs: Vec<SocketAddr>,
+    quic_listener: QuicListener,
 }
 
-impl Handshaker for TcpForwardHandshaker {
-    type Handshake<'a> = BoxFuture<'a, io::Result<Session>>;
+impl QtunServer {
+    /// Create client instance with [`QuicTunnelConfig`].
+    pub async fn new(tunnel_config: QuicTunnelConfig) -> io::Result<Self> {
+        let quic_config = make_config(&tunnel_config);
 
-    fn handshake<C: futures::prelude::AsyncWrite + futures::prelude::AsyncRead + Send + 'static>(
-        &self,
-        conn_id: &ConnId<'_>,
-        conn: C,
-    ) -> Self::Handshake<'_> {
-        let conn_id = conn_id.clone().into_owned();
+        let quic_listener =
+            QuicListener::bind(tunnel_config.laddrs.as_slice(), quic_config).await?;
 
-        Box::pin(async move {
-            let stream = TcpStream::connect(self.0.as_slice())?;
-
-            log::debug!("{:?}, tcp forward: {:?}", conn_id, self.0);
-
-            let session = Session::new(conn_id);
-
-            let (backward_read, forward_write) = stream.split();
-
-            let (forward_read, backward_write) = conn.split();
-
-            future_spawn(tunnel_copy(
-                "Tcp(forward)",
-                session.clone(),
-                forward_read,
-                forward_write,
-            ));
-
-            future_spawn(tunnel_copy(
-                "Tcp(backward)",
-                session.clone(),
-                backward_read,
-                backward_write,
-            ));
-
-            Ok(session)
+        Ok(Self {
+            quic_listener,
+            raddrs: tunnel_config.raddrs,
         })
+    }
+
+    pub async fn run(&self) -> io::Result<()> {
+        while let Some(conn) = self.quic_listener.accept().await {
+            log::info!("Quic server: accept newly connection, {}", conn);
+
+            let raddrs = self.raddrs.clone();
+
+            spawn(async move {
+                while let Some(quic_stream) = conn.stream_accept().await {
+                    let tcp_stream = match TcpStream::connect(raddrs.as_slice()).await {
+                        Ok(tcp_stream) => tcp_stream,
+                        Err(err) => {
+                            log::error!(
+                                "Quic server: create tcp stream to {:?} with error, {}",
+                                raddrs,
+                                err
+                            );
+                            continue;
+                        }
+                    };
+
+                    let raddr = match tcp_stream.peer_addr() {
+                        Ok(raddr) => raddr,
+                        Err(err) => {
+                            log::error!("Quic server: get tunnel peer_addr with error, {}", err);
+                            continue;
+                        }
+                    };
+
+                    let debug_info = format!("tunnel: {} => {}", quic_stream, raddr);
+
+                    let (tcp_read, tcp_write) = tcp_stream.split();
+                    let quic_read = quic_stream.clone();
+                    let quic_write = quic_stream;
+
+                    // create forward tunnel.
+                    spawn(tunnel_copy(debug_info.clone(), quic_read, tcp_write));
+                    // create backward tunnel.
+                    spawn(tunnel_copy(debug_info, tcp_read, quic_write));
+                }
+
+                log::info!("Quic server: connection closed, {}", conn);
+            });
+        }
+
+        todo!()
     }
 }

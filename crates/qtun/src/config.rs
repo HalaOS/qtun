@@ -1,5 +1,4 @@
 use std::{
-    io,
     net::{SocketAddr, ToSocketAddrs},
     ops::Range,
     path::PathBuf,
@@ -7,12 +6,7 @@ use std::{
 };
 
 use clap::{Parser, ValueEnum};
-use hala_rs::{
-    future::executor::future_spawn,
-    io::sleep,
-    net::quic::{Config, CongestionControlAlgorithm},
-    rproxy::{Handshaker, Rproxy},
-};
+use rasi_ext::net::quic::{Config, CongestionControlAlgorithm};
 
 type SocketAddrs = Vec<SocketAddr>;
 
@@ -160,8 +154,8 @@ pub struct QuicTunnelConfig {
     pub print_stats: Duration,
 }
 
-fn make_config(quic_tunn_config: &QuicTunnelConfig) -> Config {
-    let mut config = Config::new().unwrap();
+pub(crate) fn make_config(quic_tunn_config: &QuicTunnelConfig) -> Config {
+    let mut config = Config::new();
 
     config
         .load_cert_chain_from_pem_file(quic_tunn_config.cert_chain_file.to_str().unwrap())
@@ -182,7 +176,7 @@ fn make_config(quic_tunn_config: &QuicTunnelConfig) -> Config {
     config.set_application_protos(&[b"qtun"]).unwrap();
 
     config.set_max_idle_timeout(quic_tunn_config.timeout.as_millis() as u64);
-    config.set_max_datagram_size(quic_tunn_config.mtu);
+    config.set_max_send_udp_payload_size(quic_tunn_config.mtu);
     config.set_initial_max_data(quic_tunn_config.buf * quic_tunn_config.mux);
     config.set_initial_max_stream_data_bidi_local(quic_tunn_config.buf);
     config.set_initial_max_stream_data_bidi_remote(quic_tunn_config.buf);
@@ -194,73 +188,4 @@ fn make_config(quic_tunn_config: &QuicTunnelConfig) -> Config {
     config.set_max_stream_window(quic_tunn_config.max_stream_win);
 
     config
-}
-
-fn print_stats<H: Handshaker + Sync + Send + 'static>(
-    quic_tun_config: &QuicTunnelConfig,
-    rproxy: Rproxy<H>,
-) {
-    if !quic_tun_config.print_stats.is_zero() {
-        let duration = quic_tun_config.print_stats.clone();
-
-        future_spawn(async move {
-            loop {
-                let stats = rproxy.stats();
-
-                log::info!("{}", stats);
-
-                sleep(duration).await.unwrap();
-            }
-        });
-    }
-}
-
-#[cfg(feature = "server")]
-pub async fn run_server() -> io::Result<()> {
-    use hala_rs::{net::quic::QuicListener, rproxy::listener::quic::QuicStreamListener};
-
-    use crate::server::TcpForwardHandshaker;
-
-    let quic_tun_config = QuicTunnelConfig::parse();
-
-    let rproxy = Rproxy::new(TcpForwardHandshaker::new(
-        quic_tun_config.raddrs.as_slice(),
-    )?);
-
-    let quic_config = make_config(&quic_tun_config);
-
-    let quic_listener = QuicListener::bind(quic_tun_config.laddrs.as_slice(), quic_config)?;
-
-    print_stats(&quic_tun_config, rproxy.clone());
-
-    rproxy.accept(QuicStreamListener::from(quic_listener)).await;
-
-    Ok(())
-}
-
-#[cfg(feature = "client")]
-pub async fn run_client() -> io::Result<()> {
-    use hala_rs::net::{quic::QuicConnPool, tcp::TcpListener};
-
-    use crate::client::QuicTunnHandshaker;
-
-    let quic_tun_config = QuicTunnelConfig::parse();
-
-    let quic_config = make_config(&quic_tun_config);
-
-    let quic_conn_pool = QuicConnPool::new(
-        quic_tun_config.max_conns,
-        quic_tun_config.raddrs.as_slice(),
-        quic_config,
-    )?;
-
-    let rproxy = Rproxy::new(QuicTunnHandshaker::from(quic_conn_pool));
-
-    let tcp_listener = TcpListener::bind(quic_tun_config.laddrs.as_slice())?;
-
-    print_stats(&quic_tun_config, rproxy.clone());
-
-    rproxy.accept(tcp_listener).await;
-
-    Ok(())
 }
