@@ -40,3 +40,4 @@ num_cpus = "^1.16"
 boxcar = "^0.2.4"
 mio = { version = "^0.8.9", features = ["os-poll", "net"] }
 thiserror = "1.0.57"
+windows-sys = "^0.52"
